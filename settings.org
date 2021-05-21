@@ -1,0 +1,512 @@
+* Context
+
+  This is an ~org-babel~ Emacs configuration file, currently rolling on the
+  following setting:
+
+  - Mac OS 10.12.3 Sierra
+  - Emacs 27.1
+
+  In order to load this file, include the following lines in your ~.emacs~:
+
+#+BEGIN_SRC emacs-lisp :tangle no
+  (require 'org)
+  (org-babel-load-file "~/emacs/settings.org") ; or wherever you have it
+#+END_SRC
+
+* Complimentary hack
+
+  I got tired of trying to learn how to take environment variables from Mac OS
+  Sierra (it's apparently different for every Mac OS version), so I just set
+  them explicitly here:
+
+#+BEGIN_SRC emacs-lisp
+  (setenv "JAVA_HOME" "/Library/Java/JavaVirtualMachines/zulu-11.jdk/Contents/Home")
+  (setenv "PATH" (concat "/Users/ruaraujo/perl5/bin:/usr/local/bin:/Users/ruaraujo/apache-maven-3.5.2/bin:"
+                         (getenv "PATH")))
+  (let ((all-paths (split-string (getenv "PATH") ":")))
+    (setq exec-path (append all-paths (list "." exec-directory))))
+#+END_SRC
+
+* Things at Point
+
+  Interpreting and visiting things (mostly files and URLs) at ~point~:
+
+#+BEGIN_SRC emacs-lisp
+  (require 'thing-cmds)
+#+END_SRC
+
+* eshell
+
+  Shell emulation:
+
+#+BEGIN_SRC emacs-lisp
+(require 'eshell)
+(require 'em-prompt)
+#+END_SRC
+
+* COMMENT vterm
+
+  Set the terminal:
+
+#+BEGIN_SRC emacs-lisp
+(require 'vterm)
+(setq vterm-shell "/bin/bash")
+(setq vterm-term-environment-variable "eterm-color")
+#+END_SRC
+
+* Custom functions
+
+** Utilities
+
+#+BEGIN_SRC emacs-lisp
+  (defun ensure-list (thing)
+    (if (atom thing) (list thing) thing))
+#+END_SRC
+
+** Shell interaction
+
+   I couldn't find any function to run a list of commands on ~eshell~
+   interactively (I mean, interacting with the shell, not in the Emacs
+   ~interactive~ sense) and die afterwards, so I'm gonna roll my own scruffy one
+   (there's likely hugely better ways to do this, but it Just Works for me now).
+
+   First, let's define a function that allows enqueueing commands in ~eshell~.
+   We'll temporarily push into ~eshell-after-prompt-hook~ a function that looks
+   in a queue for commands, and sends it to ~eshell~, removing itself when
+   reaching the end of the queue.  This is HACKish as hell, but seems to work.
+
+#+BEGIN_SRC emacs-lisp
+  (defvar ruaraujo/eshell-cmd-queue nil)
+
+  (defun ruaraujo/eshell-enqueue-commands (cmds)
+    (setq ruaraujo/eshell-cmd-queue
+          (append ruaraujo/eshell-cmd-queue cmds)))
+
+  (defun ruaraujo/eshell-command-consumer ()
+    (let ((cmd (pop ruaraujo/eshell-cmd-queue)))
+      (when cmd
+        (insert cmd)
+        (eshell-send-input))))
+
+  (add-to-list 'eshell-after-prompt-hook 'ruaraujo/eshell-command-consumer)
+
+  (add-to-list 'eshell-mode-hook
+               (lambda ()
+                 (make-local-variable 'ruaraujo/eshell-cmd-queue)))
+
+  (defun ruaraujo/eshell-session (cmds &optional default-dir keep-alive)
+    (let ((cmds (append (ensure-list cmds)
+                        (unless keep-alive (list "exit"))))
+          (default-directory (or default-dir "~/")))
+      (with-current-buffer (let ((eshell-mode-hook (append eshell-mode-hook
+                                                           (list (lambda ()
+                                                                   (ruaraujo/eshell-enqueue-commands cmds))))))
+                             (eshell 'eshell-session))
+        (eshell-send-input)
+        (current-buffer))))
+
+  (defun ruaraujo/eshell-command-with-interaction (cmd)
+    (interactive "sCommand: ")
+    (ruaraujo/eshell-session cmd))
+#+END_SRC
+
+   I seem to need to fire up several different ~eshell~ buffers for some reason,
+   so let's add a convenient function + keybinding for that.
+
+#+BEGIN_SRC emacs-lisp
+  (defun ruaraujo/new-eshell ()
+    (interactive)
+    (eshell 1))
+
+  (global-set-key (kbd "s-E") 'ruaraujo/new-eshell)
+#+END_SRC
+
+** Killing space around ~point~
+
+   ~just-one-space~ is very useful, but I also like it to kill newlines:
+
+#+BEGIN_SRC emacs-lisp
+  ;; XXX I gotta check how this is implemented in my personal laptop...
+  (defun ruaraujo/just-one-space ()
+    (interactive)
+    (just-one-space))
+#+END_SRC
+
+** Moving to beginning of line
+
+   Usually I want to move to the beginning of the indentation, but sometimes
+   also to the beginning of the line.
+
+#+BEGIN_SRC emacs-lisp
+  (defun ruaraujo/beginning-of-line ()
+    (interactive)
+    (let ((old-point (point)))
+      (back-to-indentation)
+      (when (= (point) old-point)
+        (beginning-of-line))))
+#+END_SRC
+
+* Get rid of clutter
+
+  I like my Emacs lean, so let's remove the toolbar and menu:
+
+#+BEGIN_SRC emacs-lisp
+  (tool-bar-mode -1)
+  (menu-bar-mode -1)
+#+END_SRC
+
+* COMMENT Multi-term
+
+  A nicer terminal emulator than ~term~, which works well with Emacs
+  keybindings.
+
+#+BEGIN_SRC emacs-lisp
+  (require 'multi-term)
+#+END_SRC
+
+* IDO
+
+  Helper for finding files and buffers:
+
+#+BEGIN_SRC emacs-lisp
+  (require 'ido)
+  (ido-mode 1)
+#+END_SRC
+
+* Org
+
+  The default Org TODO status tags just don't cut it.  I need some more:
+
+#+BEGIN_SRC emacs-lisp
+  (setq org-todo-keywords
+        '((sequence "TODO"      ; it must be done, and depends on me to get it done 
+                    "FEEDBACK"  ; waiting for feedback from someone
+                    "BLOCKED"   ; needs to be done, but progress is blocked by some condition
+                    "|"
+                    "DONE"      ; well, done
+                    "DELEGATED" ; someone else will do it
+                    "CANCELLED" ; no need to do it anymore
+                    )))
+#+END_SRC
+
+  Faster cycling through TODO status (`C-c t` is way too much of a nuisance).
+
+#+BEGIN_SRC emacs-lisp
+  (add-hook 'org-mode-hook
+            (lambda ()
+              (local-set-key (kbd "M-p") 'org-todo)))
+#+END_SRC
+
+* Par Edit
+
+  Smart parenthesis, quotes, brackets, etc.
+
+#+BEGIN_SRC emacs-lisp
+  (require 'paredit)
+  (autoload 'enable-paredit-mode "paredit" t)
+#+END_SRC
+
+* Multiple Cursors
+
+  This neat utility allows performing the same command over several cursors
+  simultaneously.
+
+#+BEGIN_SRC emacs-lisp
+  (require 'multiple-cursors)
+  (global-set-key (kbd "C-c RET") 'mc/edit-lines)
+#+END_SRC
+
+#+RESULTS:
+: mc/edit-lines
+
+* Emacs Lisp
+
+  Use ~paredit~ in ~emacs-lisp-mode~, and a couple of useful keybindings for
+  that mode.
+
+#+BEGIN_SRC emacs-lisp
+  (add-hook 'emacs-lisp-mode-hook
+            (lambda ()
+              (paredit-mode 1)
+              (local-set-key [(control c) %] 'raise-sexp)
+              (local-set-key [(control return)] 'mark-enclosing-list)))
+#+END_SRC
+
+* Flycheck
+
+  This package offers cross-language support for spelling and syntax checking.
+  I'll use it for [[Perl]].
+
+#+BEGIN_SRC emacs-lisp
+  (require 'flycheck)
+#+END_SRC
+
+* TRAMP
+
+  TRAMP provides transparent remote file access through SSH, which is useful to
+  work with code on the KVMs:
+
+#+BEGIN_SRC emacs-lisp
+  (require 'tramp)
+  (setq tramp-default-method "ssh")
+#+END_SRC
+
+* Git grep
+
+  ~vc-git-grep~ is powerful, but has a couple of shortcomings (e.g., it's not
+  recursive by default).  Let's load ~git-grep~ instead:
+
+#+BEGIN_SRC emacs-lisp
+  (load "~/emacs/git-grep")
+#+END_SRC
+
+* Magit
+
+  Magit is a Git porcelain for Emacs that allows performing the most usual Git
+  operations with a nice and intuitive interface.
+
+#+BEGIN_SRC emacs-lisp
+  (global-set-key [(control c) (g)] 'magit-status)
+#+END_SRC
+
+  I like to easily ~ediff~ my changes wrt to ~origin/trunk~, so let's setup a
+  keybinding for that:
+
+#+BEGIN_SRC emacs-lisp
+  (defun ruaraujo/magit-ediff-head-trunk (file)
+    ;; lifted and adapted from `magit-ediff-show-working-tree'
+    (interactive
+     (list (magit-read-file-choice "Show changes in file"
+                                   (magit-changed-files "origin/trunk..HEAD")
+                                   "No changed files")))
+    (magit-with-toplevel
+      (let ((conf (current-window-configuration))
+            (bufA (magit-get-revision-buffer "origin/trunk" file))
+            (bufB (get-file-buffer file)))
+        (ediff-buffers
+         (or bufA (magit-find-file-noselect "origin/trunk" file))
+         (or bufB (find-file-noselect file))
+         `((lambda ()
+             (setq-local
+              ediff-quit-hook
+              (lambda ()
+                ,@(unless bufA '((ediff-kill-buffer-carefully ediff-buffer-A)))
+                ,@(unless bufB '((ediff-kill-buffer-carefully ediff-buffer-B)))
+                (let ((magit-ediff-previous-winconf ,conf))
+                  (run-hooks 'magit-ediff-quit-hook))))))
+         'ediff-buffers))))
+
+  (global-set-key (kbd "<f12>") 'ruaraujo/magit-ediff-head-trunk)
+#+END_SRC
+
+* Finding files
+
+#+BEGIN_SRC emacs-lisp
+  (require 'find-file-in-project)
+  (setq ffip-use-rust-fd t)
+#+END_SRC
+
+* Java
+
+#+BEGIN_SRC emacs-lisp
+  (require 'lsp-java)
+  (require 'maven-test-mode)
+  (add-hook 'java-mode-hook
+            (lambda ()
+              (lsp)
+              (maven-test-mode)
+              (local-set-key (kbd "C-c C-f") 'find-file-in-project)
+              (local-set-key (kbd "M-RET") 'helm-lsp-code-actions)))
+  (custom-set-variables '(lsp-java-vmargs '("-noverify" "-Xmx4G" "-XX:+UseG1GC" "-XX:+UseStringDeduplication")))
+#+END_SRC
+
+* Protobuf
+
+#+BEGIN_SRC emacs-lisp
+  (require 'protobuf-mode)
+#+END_SRC
+
+* Global keybindings
+
+#+BEGIN_SRC emacs-lisp
+  (global-set-key [(control a)] 'ruaraujo/beginning-of-line)
+  (global-set-key [(control tab)] 'hippie-expand)
+  (global-set-key (kbd "M-SPC") 'ruaraujo/just-one-space)
+  (global-set-key (kbd "C-;") 'comment-region)
+  (global-set-key (kbd "C-M-;") 'uncomment-region)
+  (global-set-key (kbd "C-x p") 'find-file-at-point)
+  (global-set-key (kbd "s-<return>") 'git-grep)
+  (global-set-key (kbd "C-x t") 'multi-term)
+  (global-set-key (kbd "M-+") 'text-scale-increase)
+  (global-set-key (kbd "M-_") 'text-scale-decrease)
+#+END_SRC
+
+  The ~C-<up>~ and ~C-<down>~ keybindings are usually bound to paragraph
+  navigation commands, but Mac OS really likes those key combos, so let's use
+  the Command key instead:
+
+#+BEGIN_SRC emacs-lisp
+  (global-set-key (kbd "s-<down>") 'forward-paragraph)
+  (global-set-key (kbd "s-<up>") 'backward-paragraph)
+#+END_SRC
+
+  Paragraph filling annoyingly moves point to the beggining of
+  the paragraph.  That won't do.
+
+#+BEGIN_SRC emacs-lisp
+  (global-set-key (kbd "M-q")
+                  (lambda ()
+                    (interactive)
+                    (save-excursion (fill-paragraph))))
+#+END_SRC
+
+  I use ~revert-buffer~ 99% of the times to refresh some log file, and I find it
+  annoying that I have to confirm every time.  So, let's bind a no-confirmation
+  ~revert-buffer~ call to a slightly non-fat fingering prone key combo (~s-R~).
+
+#+BEGIN_SRC emacs-lisp
+  (global-set-key (kbd "s-R") (lambda () (interactive) (revert-buffer nil t)))
+#+END_SRC
+
+  ~s-k~ is bound by default to ~kill-this-buffer~, no questions asked.  This is
+  way too aggressive for my fat-fingering inclinations, so I'll switch it with
+  ~s-M-k~:
+
+#+BEGIN_SRC emacs-lisp
+  (global-set-key (kbd "s-k") nil)
+  (global-set-key (kbd "s-M-k") 'kill-this-buffer)
+#+END_SRC
+
+  ~s-q~ kills Emacs by default. Again, not a good idea for me.
+
+#+BEGIN_SRC emacs-lisp
+  (global-set-key (kbd "s-q") nil)
+#+END_SRC
+
+* Options
+
+  Deactivate line truncation by default:
+
+#+BEGIN_SRC emacs-lisp
+  ;; FIXME this is actually not working as expected
+  (set-default 'truncate-lines nil)
+  (set-default 'truncate-partial-width-windows nil)
+  (add-hook 'org-mode-hook
+            (lambda () 
+              (setq truncate-lines nil)
+              (setq truncate-partial-width-windows nil)))
+#+END_SRC
+
+  Visualise expressions in parentheses (this is more useful for Lisp programs,
+  but meh, I guess old habits die hard):
+
+#+BEGIN_SRC emacs-lisp
+  (require 'paren)
+  (show-paren-mode 1)
+  (setq show-paren-style 'expression)
+;;  (set-face-background 'show-paren-match-face "SlateBlue4")
+#+END_SRC
+
+  Customise ~kill-line~ to kill the whole line, including the ending newline,
+  when ~point~ is at the beginning of a line:
+
+#+BEGIN_SRC emacs-lisp
+  (setq kill-whole-line t)
+#+END_SRC
+
+  Tabs are for suckers; always use space indentation:
+
+#+BEGIN_SRC emacs-lisp
+  (customize-set-variable 'indent-tabs-mode nil)
+#+END_SRC
+
+  ... although there are plenty of suckers around, so let's set the tab width:
+
+#+BEGIN_SRC emacs-lisp
+  (set-default 'tab-width 4)
+#+END_SRC
+
+  I'm an old-fashioned guy: 80 columns is enough for line-wrapping.
+
+#+BEGIN_SRC emacs-lisp
+  (set-default 'fill-coqlumn 80)
+#+END_SRC
+
+  Open in full height, reasonable width (lifted from [[https://stackoverflow.com/questions/17362999/setting-both-fullheight-and-width-in-emacs-on-os-x][StackOverflow]]):
+
+#+BEGIN_SRC emacs-lisp
+  (defun get-default-height ()
+         (/ (- (display-pixel-height) 120)
+            (frame-char-height)))
+
+  (add-to-list 'default-frame-alist '(width . 240))
+  (add-to-list 'default-frame-alist (cons 'height (get-default-height)))
+#+END_SRC
+
+  ~ediff~ vertically by default:
+
+#+BEGIN_SRC emacs-lisp
+  (setq ediff-split-window-function 'split-window-horizontally)
+#+END_SRC
+
+  And make it open the control panel in the same frame:
+
+#+BEGIN_SRC emacs-lisp
+  (set-variable 'ediff-window-setup-function 'ediff-setup-windows-plain)
+#+END_SRC
+
+* Theme
+
+#+BEGIN_SRC emacs-lisp
+  (load-theme 'tango-plus t)
+  ;; (set-face-attribute 'default (selected-frame) :height 120)
+#+END_SRC
+
+* Kubernetes
+
+#+BEGIN_SRC emacs-lisp
+  (custom-set-variables
+   '(kubernetes-overview-custom-views-alist '((my-view . (context services deployments pods configmaps))))
+   '(kubernetes-default-overview-view 'my-view))
+#+END_SRC
+
+* Python
+
+#+BEGIN_SRC emacs-lisp
+  (setenv "PATH" (concat (getenv "PATH") ":/Library/Frameworks/Python.framework/Versions/3.9/lib/python3.9/site-packages"))
+
+  (use-package elpy :ensure t :init (elpy-enable))
+#+END_SRC
+
+* Projectile
+
+#+BEGIN_SRC emacs-lisp
+  (require 'projectile)
+
+  (projectile-global-mode)
+
+  (global-set-key (kbd "C-c p s") 'projectile-switch-project)
+  (global-set-key (kbd "C-c p f") 'projectile-find-file)
+#+END_SRC
+
+* Auto-complete
+
+#+BEGIN_SRC emacs-lisp
+  (require 'auto-complete-config)
+  (ac-config-default)
+  (setq ac-show-menu-immediately-on-auto-complete t)
+#+END_SRC
+
+* COMMENT Jedi
+
+  This is a package with Python IDE capabilities (auto-completion, navigation, etc.).
+
+#+BEGIN_SRC emacs-lisp
+  (require 'jedi)
+
+  (defvar jedi-config:with-virtualenv nil)
+
+  (add-to-list 'ac-sources 'ac-source-jedi-direct)
+
+  (add-hook 'python-mode-hook 'jedi:setup)
+#+END_SRC
