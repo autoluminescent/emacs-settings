@@ -1,3 +1,5 @@
+#+OPTIONS: toc
+
 * Context
 
   This is an ~org-babel~ Emacs configuration file, currently rolling on the
