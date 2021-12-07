@@ -5,8 +5,8 @@
   This is an ~org-babel~ Emacs configuration file, currently rolling on the
   following setting:
 
-  - Mac OS 10.12.3 Sierra
-  - Emacs 27.1
+  - Mac OS 12.0.1 Monterey
+  - Emacs 27.2
 
   In order to load this file, include the following lines in your ~.emacs~:
 
