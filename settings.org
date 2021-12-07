@@ -429,7 +429,7 @@
   I'm an old-fashioned guy: 80 columns is enough for line-wrapping.
 
 #+BEGIN_SRC emacs-lisp
-  (set-default 'fill-coqlumn 80)
+  (set-default 'fill-column 80)
 #+END_SRC
 
   Open in full height, reasonable width (lifted from [[https://stackoverflow.com/questions/17362999/setting-both-fullheight-and-width-in-emacs-on-os-x][StackOverflow]]):
