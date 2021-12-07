@@ -235,10 +235,10 @@
 * Flycheck
 
   This package offers cross-language support for spelling and syntax checking.
-  I'll use it for [[Perl]].
 
 #+BEGIN_SRC emacs-lisp
   (require 'flycheck)
+  (exec-path-from-shell-initialize)
 #+END_SRC
 
 * TRAMP
@@ -257,7 +257,7 @@
   recursive by default).  Let's load ~git-grep~ instead:
 
 #+BEGIN_SRC emacs-lisp
-  (load "~/emacs/git-grep")
+  (load "~/emacs-settings/git-grep")
 #+END_SRC
 
 * Magit
@@ -306,7 +306,7 @@
   (setq ffip-use-rust-fd t)
 #+END_SRC
 
-* Java
+* COMMENT Java
 
 #+BEGIN_SRC emacs-lisp
   (require 'lsp-java)
@@ -476,6 +476,14 @@
   (setenv "PATH" (concat (getenv "PATH") ":/Library/Frameworks/Python.framework/Versions/3.9/lib/python3.9/site-packages"))
 
   (use-package elpy :ensure t :init (elpy-enable))
+  (setq elpy-rpc-backend "jedi")
+  (setq elpy-rpc-virtualenv-path 'current)
+  (setq elpy-formatter 'black)
+
+  ;; auto-format code on save according to black
+  (add-hook 'elpy-mode-hook (lambda ()
+                              (add-hook 'before-save-hook
+                                        'elpy-format-code nil t)))
 #+END_SRC
 
 * Projectile
@@ -489,7 +497,7 @@
   (global-set-key (kbd "C-c p f") 'projectile-find-file)
 #+END_SRC
 
-* Auto-complete
+* COMMENT Auto-complete
 
 #+BEGIN_SRC emacs-lisp
   (require 'auto-complete-config)
@@ -509,4 +517,149 @@
   (add-to-list 'ac-sources 'ac-source-jedi-direct)
 
   (add-hook 'python-mode-hook 'jedi:setup)
+#+END_SRC
+
+* MyPy
+
+  Add on-the-fly MyPy linting for Python (compile-time type checking).
+
+#+BEGIN_SRC emacs-lisp
+  (require 'flycheck-mypy)
+  (add-hook 'python-mode-hook 'flycheck-mode)
+
+#+END_SRC
+
+* YAML mode
+
+#+BEGIN_SRC emacs-lisp
+  (require 'yaml-mode)
+  (add-to-list 'auto-mode-alist '("\\.yml\\'" . yaml-mode))
+#+END_SRC
+
+* Cairo
+
+  A simple syntax highlighting mode for the [[cairo-lang.org][Cairo]]/StarkNet programming
+  language (lifted and adapted from
+  http://xahlee.info/emacs/emacs/elisp_syntax_coloring.html) and very
+  basic indentation.  Note that the StarkNet language is an extension
+  of Cairo that is not backwards compatible (i.e., the Cairo
+  compiler/runtime by itself cannot process StarkNet programs), but
+  for our intents we just see them as one language (Cairo by itself is
+  not really useful for us).
+
+  First, let's define the keywords:
+
+#+BEGIN_SRC emacs-lisp
+  (setq cairo-font-lock-keywords
+        (let* (
+               ;; define several category of keywords
+               (x-keywords '(
+                             ;; Cairo basics
+                             "%builtins"
+                             "%lang"
+                             "from"
+                             "import"
+                             "func"
+                             "return"
+                             "end"
+                             "if"
+                             "else"
+                             "const"
+                             "let"
+                             "alloc_locals"
+                             "local"
+                             "tempvar"
+                             "struct"
+                             "member"
+                             "assert"
+
+                             ;; StarkNet annotations
+                             "storage_var"
+                             "external"
+                             "view"
+                             ))
+               (x-types '("felt"))
+               ;; (x-constants '())
+               ;; (x-events '())
+               (x-functions '("get_fp_and_pc" "serialize_word"))
+
+               ;; generate regex string for each category of keywords
+               (x-keywords-regexp (regexp-opt x-keywords 'symbols))
+               (x-types-regexp (regexp-opt x-types 'symbols))
+               ;;(x-constants-regexp (regexp-opt x-constants 'words))
+               ;;(x-events-regexp (regexp-opt x-events 'words))
+               (x-functions-regexp (regexp-opt x-functions 'symbols)))
+
+          `(
+            (,x-types-regexp . font-lock-type-face)
+            ;; (,x-constants-regexp . font-lock-constant-face)
+            ;; (,x-events-regexp . font-lock-builtin-face)
+            (,x-functions-regexp . font-lock-function-name-face)
+            (,x-keywords-regexp . font-lock-keyword-face)
+            ;; note: order above matters, because once colored, that part won't change.
+            ;; in general, put longer words first
+            )))
+#+END_SRC
+
+  Then, let's make a basic indentation function: just augment the
+  initial amount of spaces (assumes spaces are used instead of tabs)
+  with ~tab-width~, while ensuring the amount of spaces is always a
+  multiplier of ~tab-width~.  This function can be used both for
+  indenting and unindenting.
+
+#+BEGIN_SRC emacs-lisp
+  (defun cairo--basic-indent (offset)
+    (let* ((current-column (current-indentation))
+           (current-levels (/ current-column tab-width))
+           (adjusted-column (* current-levels tab-width))
+           (target-column (+ adjusted-column (* offset tab-width))))
+      (save-excursion
+        (beginning-of-line)
+        (delete-horizontal-space)
+        (indent-to target-column))
+      (let ((x (- target-column (current-column))))
+        (when (> x 0)
+          (forward-char x)))))
+#+END_SRC
+
+  And finally, we define the ~cairo-mode~.
+
+#+BEGIN_SRC emacs-lisp
+  (define-derived-mode cairo-mode fundamental-mode "cairo"
+    "major mode for editing Cairo language code."
+
+    ;; set the font lock for the language keywords
+    (setq font-lock-defaults '((cairo-font-lock-keywords)))
+
+    ;; set the comment face
+    (setq comment-start "#")
+    (font-lock-add-keywords nil '(("#.+" . font-lock-comment-face)))
+
+    ;; define a basic indentation: TAB indents, BACKTAB unindents;
+    ;; disable electric indent
+    (setq indent-tabs-mode nil)
+    (setq tab-width 4)
+    (setq indent-line-function (lambda (&optional arg) (cairo--basic-indent 1)))
+    (local-set-key (kbd "<backtab>") (lambda () (interactive) (cairo--basic-indent -1)))
+    (electric-indent-local-mode 0))
+
+
+  (add-to-list 'auto-mode-alist '("\\.cairo\\'" . cairo-mode))
+#+END_SRC
+
+* Solidity
+
+#+BEGIN_SRC emacs-lisp
+  (require 'flycheck)
+
+  (setq solidity-flycheck-solc-checker-active t)
+  (setq solidity-flycheck-solium-checker-active t)
+  (setq solidity-flycheck-solc-additional-allow-paths '("~/.brownie/packages"))
+
+  (require 'solidity-flycheck)
+  (require 'solidity-mode)
+
+  (setq solidity-comment-style 'slash)
+
+  (add-hook 'solidity-mode-hook 'flycheck-mode)
 #+END_SRC
