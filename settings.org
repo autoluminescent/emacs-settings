@@ -540,7 +540,7 @@
 
 * Cairo
 
-  A simple syntax highlighting mode for the [[cairo-lang.org][Cairo]]/StarkNet programming
+  A simple syntax highlighting mode for the [[https://www.cairo-lang.org][Cairo]]/StarkNet programming
   language (lifted and adapted from
   http://xahlee.info/emacs/emacs/elisp_syntax_coloring.html) and very
   basic indentation.  Note that the StarkNet language is an extension
