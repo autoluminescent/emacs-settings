@@ -5,8 +5,8 @@
   This is an ~org-babel~ Emacs configuration file, currently rolling on the
   following setting:
 
-  - Mac OS 12.0.1 Monterey
-  - Emacs 27.2
+  - Mac OS 14.4.1 Sonoma
+  - Emacs 29.3
 
   In order to load this file, include the following lines in your ~.emacs~:
 
@@ -15,7 +15,30 @@
   (org-babel-load-file "~/emacs/settings.org") ; or wherever you have it
 #+END_SRC
 
-* Complimentary hack
+* Emacs-Mac specific config
+
+  Theses configs applies to the Emacs Mac port only.
+
+** Open in full screen by default
+
+  It appears that the fullscreen doesn't work natively in Mac OS, so we need to
+  explicitly do it here.
+
+#+BEGIN_SRC emacs-lisp
+  (set-frame-parameter nil 'fullscreen 'fullscreen)
+#+END_SRC
+
+** Rebind command key
+
+  I was used to the https://emacsformacosx.com/ build, which binds the command
+  key to 'super', and the option key to 'meta', so let's recover that behaviour.
+
+#+BEGIN_SRC emacs-lisp
+  (setq mac-command-modifier 'super)
+  (setq mac-option-modifier 'meta)
+#+END_SRC
+
+* COMMENT Complimentary hack
 
   I got tired of trying to learn how to take environment variables from Mac OS
   Sierra (it's apparently different for every Mac OS version), so I just set
@@ -27,6 +50,24 @@
                          (getenv "PATH")))
   (let ((all-paths (split-string (getenv "PATH") ":")))
     (setq exec-path (append all-paths (list "." exec-directory))))
+#+END_SRC
+
+* Straight
+
+#+BEGIN_SRC emacs-lisp
+  (defvar bootstrap-version)
+
+  (let ((bootstrap-file
+         (expand-file-name "straight/repos/straight.el/bootstrap.el" user-emacs-directory))
+        (bootstrap-version 6))
+    (unless (file-exists-p bootstrap-file)
+      (with-current-buffer
+          (url-retrieve-synchronously
+           "https://raw.githubusercontent.com/radian-software/straight.el/develop/install.el"
+           'silent 'inhibit-cookies)
+        (goto-char (point-max))
+        (eval-print-last-sexp)))
+    (load bootstrap-file nil 'nomessage))
 #+END_SRC
 
 * Things at Point
@@ -199,6 +240,21 @@
               (local-set-key (kbd "M-p") 'org-todo)))
 #+END_SRC
 
+
+#+BEGIN_SRC emacs-lisp
+  (setq org-image-actual-width nil)
+
+  (org-babel-do-load-languages
+   'org-babel-load-languages
+   '((ditaa . t)))
+
+  (setq ob-ditaa-jar-path "/usr/local/Cellar/ditaa/0.11.0_1/bin/")
+
+  (setcar org-emphasis-regexp-components " \t('\"{[:alpha:]")
+  (setcar (nthcdr 1 org-emphasis-regexp-components) "[:alpha:]- \t.,:!?;'\")}\\")
+  (org-set-emph-re 'org-emphasis-regexp-components org-emphasis-regexp-components)
+#+END_SRC
+
 * Par Edit
 
   Smart parenthesis, quotes, brackets, etc.
@@ -232,6 +288,23 @@
               (paredit-mode 1)
               (local-set-key [(control c) %] 'raise-sexp)
               (local-set-key [(control return)] 'mark-enclosing-list)))
+#+END_SRC
+
+* Lisp
+
+#+BEGIN_SRC emacs-lisp
+  (setq inferior-lisp-program "sbcl")
+
+  (org-babel-do-load-languages
+   'org-babel-load-languages
+   '((lisp . t)))
+
+  (add-hook 'lisp-mode-hook
+            (lambda ()
+              (paredit-mode 1)
+              (local-set-key [(control c) %] 'raise-sexp)
+              (local-set-key [(control return)] 'mark-enclosing-list)))
+
 #+END_SRC
 
 * Flycheck
@@ -322,7 +395,7 @@
   (custom-set-variables '(lsp-java-vmargs '("-noverify" "-Xmx4G" "-XX:+UseG1GC" "-XX:+UseStringDeduplication")))
 #+END_SRC
 
-* Protobuf
+* COMMENT Protobuf
 
 #+BEGIN_SRC emacs-lisp
   (require 'protobuf-mode)
@@ -464,7 +537,7 @@
   ;; (set-face-attribute 'default (selected-frame) :height 120)
 #+END_SRC
 
-* Kubernetes
+* COMMENT Kubernetes
 
 #+BEGIN_SRC emacs-lisp
   (custom-set-variables
@@ -475,17 +548,154 @@
 * Python
 
 #+BEGIN_SRC emacs-lisp
-  (setenv "PATH" (concat (getenv "PATH") ":/Library/Frameworks/Python.framework/Versions/3.9/lib/python3.9/site-packages"))
+    (use-package python)
 
-  (use-package elpy :ensure t :init (elpy-enable))
-  (setq elpy-rpc-backend "jedi")
-  (setq elpy-rpc-virtualenv-path 'current)
-  (setq elpy-formatter 'black)
+    (use-package elpy :ensure t :init (elpy-enable))
 
-  ;; auto-format code on save according to black
-  (add-hook 'elpy-mode-hook (lambda ()
-                              (add-hook 'before-save-hook
-                                        'elpy-format-code nil t)))
+    (setq elpy-rpc-backend "jedi")
+    (setq elpy-rpc-virtualenv-path 'current)
+    (setq elpy-formatter 'black)
+
+
+    (defun get-packages-not-found ()
+      (goto-char (point-min))
+      (let ((pattern "WARNING: Package(s) not found: \\(.*\\)")
+            (packages '()))
+        (if (re-search-forward pattern nil t)
+            (split-string (match-string 1) ", ")
+          (list))))
+
+
+    ;;; HACK!  This function uninstalls the black package if the version is not
+    ;;; 22.3.0.  This is because higher versions are incompatible with the version
+    ;;; of uvicorn we use.
+    (defun maybe-uninstall-black ()
+      (goto-char (point-min))
+      (when (search-forward "Name: black" nil t)
+        (unless (search-forward "Version: 22.3.0" (+ (point) 20) t)
+          (message "Uninstalling black")
+          (apply 'call-process "pip" nil nil nil (list "uninstall" "--yes" "black"))
+          t)))
+
+
+    (defun ensure-healthy-venv ()
+      (let ((py-packages
+             (list "black"
+                   "isort"
+                   "flake8"
+                   "mypy"
+                   "jedi"
+                   "epc"
+                   "elpy"
+                   "importmagic"
+                   "debugpy")))
+        (with-temp-buffer
+          (apply 'call-process "pip" nil (current-buffer) nil (cons "show" py-packages))
+          (let ((not-found (get-packages-not-found)))
+            (when (maybe-uninstall-black)
+              (setq not-found (cons "black==22.3.0" not-found)))
+            (when not-found
+              (message "Installing missing packages: %s" (string-join not-found ", "))
+              (apply 'call-process "pip" nil nil nil (cons "install" not-found)))))))
+
+    (defun find-venv (path)
+      (let ((top-level (locate-dominating-file (buffer-file-name) ".venv")))
+        (when top-level
+          (concat top-level ".venv"))))
+
+    (add-hook 'elpy-mode-hook
+              (lambda ()
+                ;; activate pyvenv tracking mode
+                (let ((current-path (buffer-file-name)))
+                  (when current-path
+                    (let ((venv-path (find-venv current-path)))
+                      (when venv-path
+                        (pyvenv-activate venv-path)
+                        (pyvenv-tracking-mode 1)
+                        (make-local-variable 'pyvenv-activate)
+                        (setq pyvenv-activate venv-path)
+
+                        ;; make sure venv is properly set up
+                        (ensure-healthy-venv)))))
+                ;; auto-format code on save according to black
+                (add-hook 'before-save-hook
+                          'elpy-format-code nil t)))
+#+END_SRC
+
+** Debugging with dap-mode
+
+  ~dap-mode~ is a mode that interacts with a DAP (Debug Adapter Protocol) server.
+
+#+BEGIN_SRC emacs-lisp
+  (use-package dap-mode
+    :after lsp-mode
+    :commands dap-debug
+    :hook ((python-mode . dap-ui-mode) (python-mode . dap-mode))
+    :config
+    (require 'dap-python)
+    (setq dap-python-debugger 'debugpy)
+    (add-hook 'dap-stopped-hook
+              (lambda (arg) (call-interactively #'dap-hydra))))
+#+END_SRC
+
+  A DAP template to run a Circularise service:
+
+#+BEGIN_SRC emacs-lisp
+  (defun ruaraujo/find-cir-root ()
+    (or (expand-file-name (locate-dominating-file default-directory "setup.cfg"))
+        (error "No cir root found")))
+
+  (defun ruaraujo/find-cir-service-main-file ()
+    (let* ((cir-root (ruaraujo/find-cir-root))
+           (files (directory-files-recursively (concat cir-root "cir/") "^.*__main__.py$")))
+      (cond ((= (length files) 0) (error "No service module found"))
+            ((= (length files) 1) (first files))
+            (t (completing-read "Select service module file: " files)))))
+
+  (defun ruaraujo/debug-project ()
+    (interactive)
+    (let* ((cir-root (ruaraujo/find-cir-root))
+           (service-main-file (ruaraujo/find-cir-service-main-file))
+           (program (file-relative-name service-main-file cir-root))
+           (name (format "Python :: Run Cir service (%s)" program)))
+      (unless (member name (mapcar #'car dap-debug-template-configurations))
+        (dap-register-debug-template name
+                                     (list :type "python"
+                                           :args ""
+                                           :cwd cir-root
+                                           :program program
+                                           :request "attach")))
+      (dap-debug (rest (assoc name dap-debug-template-configurations)))))
+#+END_SRC
+
+  Some useful keybindings for DAP:
+
+#+BEGIN_SRC emacs-lisp
+  (add-hook 'python-mode-hook
+            (lambda ()
+              (local-set-key (kbd "C-c b") 'dap-breakpoint-toggle)
+              (local-set-key (kbd "C-c t") 'dap-python-debug-test-at-point)))
+#+END_SRC
+
+
+
+** Install/update current project dependencies
+
+  This is a custom command that just installs/updates the dependencies of the
+  current project.  This assumes of course that the current activated venv is
+  the correct one, but since I use ~pyvenv-trackting-mode~, that should be the
+  case (most of the times).  Since this can take some time, we'll do this only
+  on command.
+
+#+BEGIN_SRC emacs-lisp
+  (defun ruaraujo/install-current-py-project ()
+    (interactive)
+    (let ((default-directory (projectile-project-root)))
+      (shell-command "pip install -e .\"[dev]\"")))
+
+  (add-hook 'python-mode-hook
+            (lambda ()
+              (local-set-key (kbd "C-c r") 'ruaraujo/install-current-py-project)))
 #+END_SRC
 
 * Projectile
@@ -521,14 +731,35 @@
   (add-hook 'python-mode-hook 'jedi:setup)
 #+END_SRC
 
+* COMMENT Importmagic
+
+  Automagically resolve missing imports in Python files.
+
+#+BEGIN_SRC emacs-lisp
+  (require 'importmagic)
+
+  (add-hook 'python-mode-hook
+            (lambda ()
+              (importmagic-mode)
+              (local-set-key (kbd "C-c i") 'importmagic-fix-imports)))
+#+END_SRC
+
 * MyPy
 
   Add on-the-fly MyPy linting for Python (compile-time type checking).
 
 #+BEGIN_SRC emacs-lisp
-  (require 'flycheck-mypy)
+;;  (require 'flycheck-mypy)
   (add-hook 'python-mode-hook 'flycheck-mode)
+#+END_SRC
 
+* isort
+
+  Auto-fix import order on Python files.
+
+#+BEGIN_SRC emacs-lisp
+  (require 'python-isort)
+  (add-hook 'python-mode-hook 'python-isort-on-save-mode)
 #+END_SRC
 
 * YAML mode
@@ -538,7 +769,7 @@
   (add-to-list 'auto-mode-alist '("\\.yml\\'" . yaml-mode))
 #+END_SRC
 
-* Cairo
+* COMMENT Cairo
 
   A simple syntax highlighting mode for the [[https://www.cairo-lang.org][Cairo]]/StarkNet programming
   language (lifted and adapted from
@@ -649,7 +880,7 @@
   (add-to-list 'auto-mode-alist '("\\.cairo\\'" . cairo-mode))
 #+END_SRC
 
-* Solidity
+* COMMENT Solidity
 
 #+BEGIN_SRC emacs-lisp
   (require 'flycheck)
@@ -665,3 +896,61 @@
 
   (add-hook 'solidity-mode-hook 'flycheck-mode)
 #+END_SRC
+
+* Typescript
+
+#+BEGIN_SRC emacs-lisp
+  ; (push "/Users/ruaraujo/.nvm/versions/node/v16.14.0/bin" exec-path)
+
+  (require 'typescript-mode)
+  (add-to-list 'auto-mode-alist '("\\.ts\\'" . typescript-mode))
+  (add-to-list 'auto-mode-alist '("\\.tsx\\'" . typescript-mode))
+
+  (eval-after-load 'typescript-mode
+    '(add-hook 'typescript-mode-hook
+               (lambda ()
+                 (setq typescript-indent-level 2)
+                 (add-hook 'after-save-hook 'eslint-fix nil t))))
+#+END_SRC
+
+* JSON
+
+  By default, ~json-pretty-print-buffer~ uses two spaces per indentation level,
+  but we want four spaces:
+
+#+BEGIN_SRC emacs-lisp
+  (setq json-enconding-default-indentation "    ")
+#+END_SRC
+
+  Plus, let's bind ~json-pretty-print-buffer~ to a key combination:
+
+#+BEGIN_SRC emacs-lisp
+  (add-hook 'json-mode-hook
+            (lambda ()
+              (local-set-key (kbd "C-M-q") 'json-pretty-print-buffer)
+              (make-local-variable 'js-indent-level)
+              (setq js-indent-level 2)))
+#+END_SRC
+
+* COMMENT Copilot
+
+#+BEGIN_SRC emacs-lisp
+  (use-package copilot
+    :straight (:host github :repo "zerolfx/copilot.el" :files ("dist" "*.el"))
+    :ensure t)
+
+  (add-hook 'prog-mode-hook 'copilot-mode)
+
+  (define-key copilot-completion-map (kbd "M-<tab>") 'copilot-accept-completion)
+#+END_SRC
+
+* Exec path from shell
+
+  Copy env vars from shell.
+
+#+BEGIN_SRC emacs-lisp
+  (when (memq window-system '(mac ns x))
+    (exec-path-from-shell-initialize))
+#+END_SRC
+
+
