@@ -197,7 +197,6 @@
 
 ;;----------
 
-(when (< emacs-major-version 22) (eval-when-compile (require 'cl))) ;; for Emacs 20: dolist
 
 (require 'thingatpt) ;; bounds-of-thing-at-point
 (when (and (require 'thingatpt+ nil t)  ; (no error if not found):
@@ -266,8 +265,6 @@ THING is a symbol."
         (functionp thing-fn))))
 
 (defcustom thing-types (let ((types  ()))
-                         (eval-when-compile ;; `push', `dolist', for Emacs 20
-                          (when (< emacs-major-version 21) (require 'cl)))
                          (mapatoms
                           (lambda (tt)
                             (when (thgcmd-defined-thing-p tt) (push (symbol-name tt) types))))

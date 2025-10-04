@@ -2,11 +2,10 @@
 
 * Context
 
-  This is an ~org-babel~ Emacs configuration file, currently rolling on the
-  following setting:
+  This is an ~org-babel~ Emacs configuration file, currently rolling on the following setting:
 
-  - Mac OS 14.4.1 Sonoma
-  - Emacs 29.3
+  - Mac OS 26.0.1
+  - Emacs 30.1
 
   In order to load this file, include the following lines in your ~.emacs~:
 
@@ -17,42 +16,59 @@
 
 * Emacs-Mac specific config
 
-  Theses configs applies to the Emacs Mac port only.
+  These configs applies to the Emacs Mac port only.
 
 ** Open in full screen by default
 
-  It appears that the fullscreen doesn't work natively in Mac OS, so we need to
-  explicitly do it here.
+  It appears that the fullscreen doesn't work natively in Mac OS, so we need to explicitly do it
+  here.
 
 #+BEGIN_SRC emacs-lisp
   (set-frame-parameter nil 'fullscreen 'fullscreen)
 #+END_SRC
 
-** Rebind command key
+* Backups
 
-  I was used to the https://emacsformacosx.com/ build, which binds the command
-  key to 'super', and the option key to 'meta', so let's recover that behaviour.
+  Lifted from:
+  https://stackoverflow.com/questions/151945/how-do-i-control-how-emacs-makes-backup-files
+
+  Avoid saving the back-up on the same directory as the original file.  This is useful for Helm, for
+  example, which takes all files on the templates directory, mixing in back-ups as well.
 
 #+BEGIN_SRC emacs-lisp
-  (setq mac-command-modifier 'super)
-  (setq mac-option-modifier 'meta)
+  (defconst emacs-tmp-dir (expand-file-name (format "emacs%d" (user-uid)) temporary-file-directory))
+  (setq backup-directory-alist
+        `((".*" . ,emacs-tmp-dir)))
 #+END_SRC
 
-* COMMENT Complimentary hack
-
-  I got tired of trying to learn how to take environment variables from Mac OS
-  Sierra (it's apparently different for every Mac OS version), so I just set
-  them explicitly here:
+  Safest way to create back-ups is by copying (rather than renaming the original):
 
 #+BEGIN_SRC emacs-lisp
-  (setenv "JAVA_HOME" "/Library/Java/JavaVirtualMachines/zulu-11.jdk/Contents/Home")
-  (setenv "PATH" (concat "/Users/ruaraujo/perl5/bin:/usr/local/bin:/Users/ruaraujo/apache-maven-3.5.2/bin:"
-                         (getenv "PATH")))
-  (let ((all-paths (split-string (getenv "PATH") ":")))
-    (setq exec-path (append all-paths (list "." exec-directory))))
+  (setq backup-by-copying t)
+#+END_SRC
+
+  Also, auto-save files can mess up some stuff (for example, Uvicorn auto-reload):
+
+#+BEGIN_SRC emacs-lisp
+  (setq auto-save-file-name-transforms
+        `((".*" ,emacs-tmp-dir t)))
+  (setq auto-save-list-file-prefix
+        emacs-tmp-dir)
+#+END_SRC
+
+  Finally, even after all this, Emacs _still_ creates so-called _lock files_, which are symlinks.
+  Since this is really only useful for multiple users editing the same file concurrently, which
+  never happens to me, we can disable this.
+
+#+BEGIN_SRC emacs-lisp
+  (setq create-lockfiles nil)
 #+END_SRC
 
 * Straight
+
+  Straight is a convenient package manager.  Unfortunately, I have relied too much on manually
+  installing packages, so not all packages are here.  Installing Emacs in a new environment is
+  pretty much a trial-and-error process for me.  But I'm getting there.
 
 #+BEGIN_SRC emacs-lisp
   (defvar bootstrap-version)
@@ -72,11 +88,15 @@
 
 * Things at Point
 
-  Interpreting and visiting things (mostly files and URLs) at ~point~:
+  Interpreting and visiting things (mostly files and URLs) at ~point~.  I'll bind to a key
+  combination this later on.
 
 #+BEGIN_SRC emacs-lisp
   (require 'thing-cmds)
 #+END_SRC
+
+  The source code for this package, lifted from somewhere I can't remember, can be found alongside
+  this settings file.  I should look into a package for this sometime.  😅
 
 * eshell
 
@@ -85,16 +105,6 @@
 #+BEGIN_SRC emacs-lisp
 (require 'eshell)
 (require 'em-prompt)
-#+END_SRC
-
-* COMMENT vterm
-
-  Set the terminal:
-
-#+BEGIN_SRC emacs-lisp
-(require 'vterm)
-(setq vterm-shell "/bin/bash")
-(setq vterm-term-environment-variable "eterm-color")
 #+END_SRC
 
 * Custom functions
@@ -106,79 +116,20 @@
     (if (atom thing) (list thing) thing))
 #+END_SRC
 
-** Shell interaction
-
-   I couldn't find any function to run a list of commands on ~eshell~
-   interactively (I mean, interacting with the shell, not in the Emacs
-   ~interactive~ sense) and die afterwards, so I'm gonna roll my own scruffy one
-   (there's likely hugely better ways to do this, but it Just Works for me now).
-
-   First, let's define a function that allows enqueueing commands in ~eshell~.
-   We'll temporarily push into ~eshell-after-prompt-hook~ a function that looks
-   in a queue for commands, and sends it to ~eshell~, removing itself when
-   reaching the end of the queue.  This is HACKish as hell, but seems to work.
-
-#+BEGIN_SRC emacs-lisp
-  (defvar ruaraujo/eshell-cmd-queue nil)
-
-  (defun ruaraujo/eshell-enqueue-commands (cmds)
-    (setq ruaraujo/eshell-cmd-queue
-          (append ruaraujo/eshell-cmd-queue cmds)))
-
-  (defun ruaraujo/eshell-command-consumer ()
-    (let ((cmd (pop ruaraujo/eshell-cmd-queue)))
-      (when cmd
-        (insert cmd)
-        (eshell-send-input))))
-
-  (add-to-list 'eshell-after-prompt-hook 'ruaraujo/eshell-command-consumer)
-
-  (add-to-list 'eshell-mode-hook
-               (lambda ()
-                 (make-local-variable 'ruaraujo/eshell-cmd-queue)))
-
-  (defun ruaraujo/eshell-session (cmds &optional default-dir keep-alive)
-    (let ((cmds (append (ensure-list cmds)
-                        (unless keep-alive (list "exit"))))
-          (default-directory (or default-dir "~/")))
-      (with-current-buffer (let ((eshell-mode-hook (append eshell-mode-hook
-                                                           (list (lambda ()
-                                                                   (ruaraujo/eshell-enqueue-commands cmds))))))
-                             (eshell 'eshell-session))
-        (eshell-send-input)
-        (current-buffer))))
-
-  (defun ruaraujo/eshell-command-with-interaction (cmd)
-    (interactive "sCommand: ")
-    (ruaraujo/eshell-session cmd))
-#+END_SRC
-
-   I seem to need to fire up several different ~eshell~ buffers for some reason,
-   so let's add a convenient function + keybinding for that.
-
-#+BEGIN_SRC emacs-lisp
-  (defun ruaraujo/new-eshell ()
-    (interactive)
-    (eshell 1))
-
-  (global-set-key (kbd "s-E") 'ruaraujo/new-eshell)
-#+END_SRC
-
 ** Killing space around ~point~
 
    ~just-one-space~ is very useful, but I also like it to kill newlines:
 
 #+BEGIN_SRC emacs-lisp
-  ;; XXX I gotta check how this is implemented in my personal laptop...
   (defun ruaraujo/just-one-space ()
     (interactive)
-    (just-one-space))
+    (just-one-space -1))
 #+END_SRC
 
 ** Moving to beginning of line
 
-   Usually I want to move to the beginning of the indentation, but sometimes
-   also to the beginning of the line.
+   Usually I want to move to the beginning of the indentation, but sometimes also to the beginning
+   of the line, so this little utility lets me toggle between the two.
 
 #+BEGIN_SRC emacs-lisp
   (defun ruaraujo/beginning-of-line ()
@@ -191,20 +142,12 @@
 
 * Get rid of clutter
 
-  I like my Emacs lean, so let's remove the toolbar and menu:
+  I like my Emacs lean, so let's remove the toolbar, menu, and scrollbar:
 
 #+BEGIN_SRC emacs-lisp
   (tool-bar-mode -1)
   (menu-bar-mode -1)
-#+END_SRC
-
-* COMMENT Multi-term
-
-  A nicer terminal emulator than ~term~, which works well with Emacs
-  keybindings.
-
-#+BEGIN_SRC emacs-lisp
-  (require 'multi-term)
+  (scroll-bar-mode -1)
 #+END_SRC
 
 * IDO
@@ -228,8 +171,18 @@
                     "|"
                     "DONE"      ; well, done
                     "DELEGATED" ; someone else will do it
+                    "POSTPONED" ; will be done at a later time
                     "CANCELLED" ; no need to do it anymore
                     )))
+  (setq org-todo-keyword-faces
+        '(( "TODO"      . (:foreground "red" :weight bold))
+          ( "FEEDBACK"  . (:foreground "orange" :weight bold))
+          ( "BLOCKED"   . (:foreground "red" :weight bold))
+          ( "DONE"      . (:foreground "dark green" :weight bold))
+          ( "DELEGATED" . (:foreground "blue" :weight bold))
+          ( "POSTPONED" . (:foreground "gray" :weight bold))
+          ( "CANCELLED" . (:foreground "gray" :weight bold))
+          ))
 #+END_SRC
 
   Faster cycling through TODO status (`C-c t` is way too much of a nuisance).
@@ -266,21 +219,17 @@
 
 * Multiple Cursors
 
-  This neat utility allows performing the same command over several cursors
-  simultaneously.
+  This neat utility allows performing the same command over several cursors simultaneously.  Super
+  useful.
 
 #+BEGIN_SRC emacs-lisp
   (require 'multiple-cursors)
   (global-set-key (kbd "C-c RET") 'mc/edit-lines)
 #+END_SRC
 
-#+RESULTS:
-: mc/edit-lines
-
 * Emacs Lisp
 
-  Use ~paredit~ in ~emacs-lisp-mode~, and a couple of useful keybindings for
-  that mode.
+  Use ~paredit~ in ~emacs-lisp-mode~, and a couple of useful keybindings for that mode.
 
 #+BEGIN_SRC emacs-lisp
   (add-hook 'emacs-lisp-mode-hook
@@ -316,16 +265,6 @@
   (exec-path-from-shell-initialize)
 #+END_SRC
 
-* TRAMP
-
-  TRAMP provides transparent remote file access through SSH, which is useful to
-  work with code on the KVMs:
-
-#+BEGIN_SRC emacs-lisp
-  (require 'tramp)
-  (setq tramp-default-method "ssh")
-#+END_SRC
-
 * Git grep
 
   ~vc-git-grep~ is powerful, but has a couple of shortcomings (e.g., it's not
@@ -344,15 +283,16 @@
   (global-set-key [(control c) (g)] 'magit-status)
 #+END_SRC
 
-  I like to easily ~ediff~ my changes wrt to ~origin/trunk~, so let's setup a
-  keybinding for that:
+  I like to easily ~ediff~ my changes wrt to ~origin/main~, so let's setup a keybinding for that:
 
 #+BEGIN_SRC emacs-lisp
+  (require 'magit)
+
   (defun ruaraujo/magit-ediff-head-trunk (file)
     ;; lifted and adapted from `magit-ediff-show-working-tree'
     (interactive
      (list (magit-read-file-choice "Show changes in file"
-                                   (magit-changed-files "origin/trunk..HEAD")
+                                   (magit-changed-files "origin/main..HEAD")
                                    "No changed files")))
     (magit-with-toplevel
       (let ((conf (current-window-configuration))
@@ -374,31 +314,17 @@
   (global-set-key (kbd "<f12>") 'ruaraujo/magit-ediff-head-trunk)
 #+END_SRC
 
+  We use a lot of pre-commit hooks which output ANSI colour codes, so let's make Magit handle them:
+
+#+BEGIN_SRC emacs-lisp
+  (setq magit-process-finish-apply-ansi-colors t)
+#+END_SRC
+
 * Finding files
 
 #+BEGIN_SRC emacs-lisp
   (require 'find-file-in-project)
   (setq ffip-use-rust-fd t)
-#+END_SRC
-
-* COMMENT Java
-
-#+BEGIN_SRC emacs-lisp
-  (require 'lsp-java)
-  (require 'maven-test-mode)
-  (add-hook 'java-mode-hook
-            (lambda ()
-              (lsp)
-              (maven-test-mode)
-              (local-set-key (kbd "C-c C-f") 'find-file-in-project)
-              (local-set-key (kbd "M-RET") 'helm-lsp-code-actions)))
-  (custom-set-variables '(lsp-java-vmargs '("-noverify" "-Xmx4G" "-XX:+UseG1GC" "-XX:+UseStringDeduplication")))
-#+END_SRC
-
-* COMMENT Protobuf
-
-#+BEGIN_SRC emacs-lisp
-  (require 'protobuf-mode)
 #+END_SRC
 
 * Global keybindings
@@ -411,7 +337,6 @@
   (global-set-key (kbd "C-M-;") 'uncomment-region)
   (global-set-key (kbd "C-x p") 'find-file-at-point)
   (global-set-key (kbd "s-<return>") 'git-grep)
-  (global-set-key (kbd "C-x t") 'multi-term)
   (global-set-key (kbd "M-+") 'text-scale-increase)
   (global-set-key (kbd "M-_") 'text-scale-decrease)
 #+END_SRC
@@ -479,7 +404,6 @@
   (require 'paren)
   (show-paren-mode 1)
   (setq show-paren-style 'expression)
-;;  (set-face-background 'show-paren-match-face "SlateBlue4")
 #+END_SRC
 
   Customise ~kill-line~ to kill the whole line, including the ending newline,
@@ -498,13 +422,25 @@
   ... although there are plenty of suckers around, so let's set the tab width:
 
 #+BEGIN_SRC emacs-lisp
-  (set-default 'tab-width 4)
+  (setq-default tab-width 4)
 #+END_SRC
 
-  I'm an old-fashioned guy: 80 columns is enough for line-wrapping.
+  This by itself doesn't do much, because most modes set their own tab width.  For example, in
+  ~python-mode~, the default is 8, which is ridiculous.  Let's fix it:
 
 #+BEGIN_SRC emacs-lisp
-  (set-default 'fill-column 80)
+  (add-hook 'python-ts-mode-hook (lambda () (setq tab-width 4)))
+  (add-hook 'yaml-mode-hook (lambda () (setq tab-width 2)))
+  (add-hook 'js-mode-hook (lambda () (setq tab-width 2)))
+  (add-hook 'json-mode-hook (lambda () (setq tab-width 2)))
+  (add-hook 'typescript-mode-hook (lambda () (setq tab-width 2)))
+  (add-hook 'emacs-lisp-mode-hook (lambda () (setq tab-width 2)))
+#+END_SRC
+
+    I'm an old-fashioned guy: 100 columns is enough for line-wrapping.
+
+#+BEGIN_SRC emacs-lisp
+    (set-default 'fill-column 100)
 #+END_SRC
 
   Open in full height, reasonable width (lifted from [[https://stackoverflow.com/questions/17362999/setting-both-fullheight-and-width-in-emacs-on-os-x][StackOverflow]]):
@@ -533,169 +469,258 @@
 * Theme
 
 #+BEGIN_SRC emacs-lisp
-  (load-theme 'tango-plus t)
-  ;; (set-face-attribute 'default (selected-frame) :height 120)
+  (use-package timu-macos-theme :ensure t)
+  (customize-set-variable 'timu-macos-flavour "light")
+
+  (customize-set-variable 'timu-macos-scale-org-document-title t)
+  (customize-set-variable 'timu-macos-scale-org-document-info t)
+  (customize-set-variable 'timu-macos-scale-org-level-1 t)
+  (customize-set-variable 'timu-macos-scale-org-level-2 t)
+  (customize-set-variable 'timu-macos-scale-org-level-3 t)
+
+  (customize-set-variable 'timu-macos-org-intense-colors t)
+
+  (load-theme 'timu-macos t)
+
+  (add-to-list 'default-frame-alist '(font . "SF Mono-13"))
+
+  (use-package timu-line :ensure t :config (timu-line-mode 1))
 #+END_SRC
 
-* COMMENT Kubernetes
+* Indent bars
+
+  A more optimised and better looking indent highlighter.
 
 #+BEGIN_SRC emacs-lisp
-  (custom-set-variables
-   '(kubernetes-overview-custom-views-alist '((my-view . (context services deployments pods configmaps))))
-   '(kubernetes-default-overview-view 'my-view))
-#+END_SRC
-
-* Python
-
-#+BEGIN_SRC emacs-lisp
-    (use-package python)
-
-    (use-package elpy :ensure t :init (elpy-enable))
-
-    (setq elpy-rpc-backend "jedi")
-    (setq elpy-rpc-virtualenv-path 'current)
-    (setq elpy-formatter 'black)
-
-
-    (defun get-packages-not-found ()
-      (goto-char (point-min))
-      (let ((pattern "WARNING: Package(s) not found: \\(.*\\)")
-            (packages '()))
-        (if (re-search-forward pattern nil t)
-            (split-string (match-string 1) ", ")
-          (list))))
-
-
-    ;;; HACK!  This function uninstalls the black package if the version is not
-    ;;; 22.3.0.  This is because higher versions are incompatible with the version
-    ;;; of uvicorn we use.
-    (defun maybe-uninstall-black ()
-      (goto-char (point-min))
-      (when (search-forward "Name: black" nil t)
-        (unless (search-forward "Version: 22.3.0" (+ (point) 20) t)
-          (message "Uninstalling black")
-          (apply 'call-process "pip" nil nil nil (list "uninstall" "--yes" "black"))
-          t)))
-
-
-    (defun ensure-healthy-venv ()
-      (let ((py-packages
-             (list "black"
-                   "isort"
-                   "flake8"
-                   "mypy"
-                   "jedi"
-                   "epc"
-                   "elpy"
-                   "importmagic"
-                   "debugpy")))
-        (with-temp-buffer
-          (apply 'call-process "pip" nil (current-buffer) nil (cons "show" py-packages))
-          (let ((not-found (get-packages-not-found)))
-            (when (maybe-uninstall-black)
-              (setq not-found (cons "black==22.3.0" not-found)))
-            (when not-found
-              (message "Installing missing packages: %s" (string-join not-found ", "))
-              (apply 'call-process "pip" nil nil nil (cons "install" not-found)))))))
-
-    (defun find-venv (path)
-      (let ((top-level (locate-dominating-file (buffer-file-name) ".venv")))
-        (when top-level
-          (concat top-level ".venv"))))
-
-    (add-hook 'elpy-mode-hook
-              (lambda ()
-                ;; activate pyvenv tracking mode
-                (let ((current-path (buffer-file-name)))
-                  (when current-path
-                    (let ((venv-path (find-venv current-path)))
-                      (when venv-path
-                        (pyvenv-activate venv-path)
-                        (pyvenv-tracking-mode 1)
-                        (make-local-variable 'pyvenv-activate)
-                        (setq pyvenv-activate venv-path)
-
-                        ;; make sure venv is properly set up
-                        (ensure-healthy-venv)))))
-                ;; auto-format code on save according to black
-                (add-hook 'before-save-hook
-                          'elpy-format-code nil t)))
-#+END_SRC
-
-** Debugging with dap-mode
-
-  ~dap-mode~ is a mode that interacts with a DAP (Debug Adapter Protocol) server.
-
-#+BEGIN_SRC emacs-lisp
-  (use-package dap-mode
-    :after lsp-mode
-    :commands dap-debug
-    :hook ((python-mode . dap-ui-mode) (python-mode . dap-mode))
+  (use-package indent-bars
+    :ensure t
     :config
-    (require 'dap-python)
-    (setq dap-python-debugger 'debugpy)
-    (add-hook 'dap-stopped-hook
-              (lambda (arg) (call-interactively #'dap-hydra))))
+    (setopt
+     ;; HACK! I'm using an Emacs port that supports stipples only
+     ;; partially, making it impossible to set the bar colour
+     indent-bars-prefer-character t
+     indent-bars-pattern "."
+     indent-bars-width-frac 0.5
+     indent-bars-pad-frac 0.25
+     indent-bars-color-by-depth nil
+     indent-bars-color '(highlight :blend 0.1)
+     indent-bars-highlight-current-depth '(:face default :blend 0.2))
+    :custom
+    (indent-bars-no-descend-lists t)   ; no extra bars in continued func arg lists
+    (indent-bars-treesit-support t)
+    (indent-bars-treesit-ignore-blank-lines-types '("module"))
+    (indent-bars-treesit-scope '((python function_definition class_definition for_statement
+  	                                   if_statement with_statement while_statement)))
+    (indent-bars-treesit-wrap '((python argument_list parameters
+  				                      list list_comprehension
+  				                      dictionary dictionary_comprehension
+  				                      parenthesized_expression subscript)))
+    :hook ((python-ts-mode yaml-mode) . indent-bars-mode))
+
 #+END_SRC
 
-  A DAP template to run a Circularise service:
+  This enables ~tree-sitter~ integration in ~indent-bars~, which makes it look
+  nicer.
 
 #+BEGIN_SRC emacs-lisp
-  (defun ruaraujo/find-cir-root ()
-    (or (expand-file-name (locate-dominating-file default-directory "setup.cfg"))
-        (error "No cir root found")))
-
-  (defun ruaraujo/find-cir-service-main-file ()
-    (let* ((cir-root (ruaraujo/find-cir-root))
-           (files (directory-files-recursively (concat cir-root "cir/") "^.*__main__.py$")))
-      (cond ((= (length files) 0) (error "No service module found"))
-            ((= (length files) 1) (first files))
-            (t (completing-read "Select service module file: " files)))))
-
-  (defun ruaraujo/debug-project ()
-    (interactive)
-    (let* ((cir-root (ruaraujo/find-cir-root))
-           (service-main-file (ruaraujo/find-cir-service-main-file))
-           (program (file-relative-name service-main-file cir-root))
-           (name (format "Python :: Run Cir service (%s)" program)))
-      (unless (member name (mapcar #'car dap-debug-template-configurations))
-        (dap-register-debug-template name
-                                     (list :type "python"
-                                           :args ""
-                                           :cwd cir-root
-                                           :program program
-                                           :request "attach")))
-      (dap-debug (rest (assoc name dap-debug-template-configurations)))))
+  (add-hook 'python-ts-mode-hook (lambda () (treesit-parser-create 'python)))
 #+END_SRC
 
-  Some useful keybindings for DAP:
+* Python with treesitter and eglot
+
+  I used an Elpy-based setup, but it was frankly too cumbersome and outdated to maintain.  The
+  treesitter+eglot setup is more modern, faster, and generally better (for example, find definition
+  is much more accurate).
 
 #+BEGIN_SRC emacs-lisp
-  (add-hook 'python-mode-hook
-            (lambda ()
-              (local-set-key (kbd "C-c b") 'dap-breakpoint-toggle)
-              (local-set-key (kbd "C-c t") 'dap-python-debug-test-at-point)))
+  (setq major-mode-remap-alist
+        '((python-mode . python-ts-mode)))
+#+END_SRC
+
+  +Ensure that ~eglot~ starts when a Python buffer is open.+
+
+  We should explicitly call ~eglot~ (only need to do so once or twice per Emacs session).  More info
+  on why ~eglot-ensure~ is not recommended:
+  https://lists.gnu.org/archive/html/bug-gnu-emacs/2023-01/msg00436.html
+
+  This caused Emacs to hang when opening a Python file in a directory that was not managed by Eglot.
+
+  Set Pyright as the LSP server for Python:
+
+#+BEGIN_SRC emacs-lisp
+  (with-eval-after-load 'eglot
+    (add-to-list 'eglot-server-programs
+                 '(python-ts-mode . ("pyright-langserver" "--stdio"))))
+#+END_SRC
+
+  Eglot pretty much figures out everything on its own, so no need to set up the LSP server or
+  anything.  We'll just make sure that we have a venv and that ~pyright~ is installed in there.
+
+#+BEGIN_SRC emacs-lisp
+  (use-package python)
+
+  (require 'ruff-format)
+
+  (reformatter-define ruff-fix
+    :program ruff-format-command
+    :args (list "check" "--fix" "--exit-zero" "--stdin-filename" (or (buffer-file-name) input-file))
+    :lighter " RuffFix"
+    :group 'ruff-format)
+
+  (defun get-packages-not-found (pkgs)
+    (let ((not-found '()))
+      (dolist (pkg pkgs)
+        (goto-char (point-min))
+        (unless (search-forward-regexp (concat "^" pkg) nil t)
+          (push pkg not-found)))
+      not-found))
+
+  (defun ensure-healthy-venv ()
+    (let ((py-packages
+           (list
+            "ruff"
+            ;; "mypy"
+            "pyright"
+            ;; "pylsp-mypy"
+            ;; "pylsp-rope"
+            ;; "python-lsp-ruff"
+            ;; "debugpy"
+            )))
+      (with-temp-buffer
+        (apply 'call-process "pip" nil (current-buffer) nil (list "list"))
+        (let ((not-found (get-packages-not-found py-packages)))
+          (cond (not-found
+                 (message "Installing missing packages: %s" (string-join not-found ", "))
+                 (apply 'call-process "pip" nil nil nil (cons "install" not-found)))
+                (t (message "All packages found")))))))
+
+  (defun find-venv (path)
+    (or (let ((top-level (locate-dominating-file (buffer-file-name) ".venv")))
+          (when top-level
+            (concat top-level ".venv")))
+        ;; TODO use a glob here? better integration with pants
+        (let* ((common-suffixes '("dist/export/python/virtualenvs/python-default/3.11.11" ".venv" "venv"))
+               (top-level (locate-dominating-file
+                           (buffer-file-name)
+                           (lambda (path)
+                             (and (directory-name-p path)
+                                  (cl-some (lambda (suffix)
+                                             (file-exists-p (concat path suffix)))
+                                           common-suffixes))
+                             ))))
+          (when top-level
+            (message "Found venv at %s" top-level)
+            (cl-some (lambda (suffix) (let ((path (concat top-level suffix))) (when (file-exists-p path) path)))
+                     common-suffixes)))))
+
+  (defun find-and-activate-venv ()
+    ;; activate pyvenv tracking mode
+    (let ((current-path (buffer-file-name)))
+      (when current-path
+        (let ((venv-path (find-venv current-path)))
+          (if (null venv-path)
+              (message "No venv found")
+            (message "Activating venv at %s" venv-path)
+            (pyvenv-activate venv-path)
+            (pyvenv-tracking-mode 1)
+            (make-local-variable 'pyvenv-activate)
+            (setq pyvenv-activate venv-path)
+
+            ;; make sure venv is properly set up
+            (message "Ensuring healthy venv")
+            (ensure-healthy-venv)))))
+
+    ;; Auto-format code on save according to ruff.  Note: there's no
+    ;; command in ruff to both format and fix linting issues.  See:
+    ;; https://github.com/astral-sh/ruff/issues/8232
+    ;; TODO figure out how to have `eglot-format' do this automatically
+    (ruff-fix-on-save-mode 1)
+    (ruff-format-on-save-mode 1)
+    )
+
+  (add-hook 'python-ts-mode-hook 'find-and-activate-venv)
+
+  ;; (setenv "PYLSP_MYPY_ALLOW_DANGEROUS_CODE_EXECUTION" "1")
+#+END_SRC
+
+** Electric pairs
+
+#+BEGIN_SRC emacs-lisp
+  (add-hook 'python-ts-mode-hook 'electric-pair-mode)
 #+END_SRC
 
 
+** Keybindings
 
-** Install/update current project dependencies
-
-  This is a custom command that just installs/updates the dependencies of the
-  current project.  This assumes of course that the current activated venv is
-  the correct one, but since I use ~pyvenv-trackting-mode~, that should be the
-  case (most of the times).  Since this can take some time, we'll do this only
-  on command.
+  Use ~s-<left>~ and ~s-<right>~ to indent / dedent regions.  This is usually
+  bound to beggining / ending of lie, but I am more used to ~C-e~ / ~C-a~ for
+  that.
 
 #+BEGIN_SRC emacs-lisp
-  (defun ruaraujo/install-current-py-project ()
-    (interactive)
-    (let ((default-directory (projectile-project-root)))
-      (shell-command "pip install -e .\"[dev]\"")))
+  (define-key python-ts-mode-map (kbd "s-<left>") 'python-indent-shift-left)
+  (define-key python-ts-mode-map (kbd "s-<right>") 'python-indent-shift-right)
+#+END_SRC
 
-  (add-hook 'python-mode-hook
-            (lambda ()
-              (local-set-key (kbd "C-c r") 'ruaraujo/install-current-py-project)))
+  And ~C-c r~ to rename symbols in Python using ~eglot~:
+
+#+BEGIN_SRC emacs-lisp
+  (define-key python-ts-mode-map (kbd "C-c r") 'eglot-rename)
+#+END_SRC
+
+  Elpy-style line move.  ~transpose-lines~ leaves point at a wrong position, and doesn't support
+  moving whole regions.  Note: this still doesn't work nicely when the region doesn't cover entire
+  lines.
+
+#+BEGIN_SRC emacs-lisp
+  (use-package move-text :ensure t
+    :bind (("M-<up>" . move-text-up)
+           ("M-<down>" . move-text-down))
+    :config
+    (setq move-text-default-bindings nil))
+#+END_SRC
+
+* Corfu
+
+  I use [Corfu](https://github.com/minad/corfu) as the completion UI backend.
+
+#+BEGIN_SRC emacs-lisp
+  (use-package corfu
+    :custom
+    (corfu-auto t)                    ;; Enable automatic completion
+    (corfu-quit-no-match 'separator)  ;; Only stay alive if there is no match and `corfu-separator' has been inserted
+    ;; (corfu-cycle t)                ;; Enable cycling for `corfu-next/previous'
+    ;; (corfu-quit-at-boundary nil)   ;; Never quit at completion boundary
+    ;; (corfu-preview-current nil)    ;; Disable current candidate preview
+    ;; (corfu-preselect 'prompt)      ;; Preselect the prompt
+    ;; (corfu-on-exact-match nil)     ;; Configure handling of exact matches
+    
+
+    :init
+    (global-corfu-mode)
+
+    ;; Enable optional extension modes:
+    (corfu-history-mode)
+    (corfu-popupinfo-mode)
+    )
+
+  ;; A few more useful configurations...
+  (use-package emacs
+    :custom
+    ;; TAB cycle if there are only few candidates
+    ;; (completion-cycle-threshold 3)
+
+    ;; Enable indentation+completion using the TAB key.
+    ;; `completion-at-point' is often bound to M-TAB.
+    (tab-always-indent 'complete)
+
+    ;; Emacs 30 and newer: Disable Ispell completion function.
+    ;; Try `cape-dict' as an alternative.
+    (text-mode-ispell-word-completion nil)
+
+    ;; Hide commands in M-x which do not apply to the current mode.  Corfu
+    ;; commands are hidden, since they are not used via M-x. This setting is
+    ;; useful beyond Corfu.
+    (read-extended-command-predicate #'command-completion-default-include-p))
 #+END_SRC
 
 * Projectile
@@ -706,60 +731,7 @@
   (projectile-global-mode)
 
   (global-set-key (kbd "C-c p s") 'projectile-switch-project)
-  (global-set-key (kbd "C-c p f") 'projectile-find-file)
-#+END_SRC
-
-* COMMENT Auto-complete
-
-#+BEGIN_SRC emacs-lisp
-  (require 'auto-complete-config)
-  (ac-config-default)
-  (setq ac-show-menu-immediately-on-auto-complete t)
-#+END_SRC
-
-* COMMENT Jedi
-
-  This is a package with Python IDE capabilities (auto-completion, navigation, etc.).
-
-#+BEGIN_SRC emacs-lisp
-  (require 'jedi)
-
-  (defvar jedi-config:with-virtualenv nil)
-
-  (add-to-list 'ac-sources 'ac-source-jedi-direct)
-
-  (add-hook 'python-mode-hook 'jedi:setup)
-#+END_SRC
-
-* COMMENT Importmagic
-
-  Automagically resolve missing imports in Python files.
-
-#+BEGIN_SRC emacs-lisp
-  (require 'importmagic)
-
-  (add-hook 'python-mode-hook
-            (lambda ()
-              (importmagic-mode)
-              (local-set-key (kbd "C-c i") 'importmagic-fix-imports)))
-#+END_SRC
-
-* MyPy
-
-  Add on-the-fly MyPy linting for Python (compile-time type checking).
-
-#+BEGIN_SRC emacs-lisp
-;;  (require 'flycheck-mypy)
-  (add-hook 'python-mode-hook 'flycheck-mode)
-#+END_SRC
-
-* isort
-
-  Auto-fix import order on Python files.
-
-#+BEGIN_SRC emacs-lisp
-  (require 'python-isort)
-  (add-hook 'python-mode-hook 'python-isort-on-save-mode)
+  (global-set-key (kbd "C-c f") 'projectile-find-file)
 #+END_SRC
 
 * YAML mode
@@ -769,138 +741,10 @@
   (add-to-list 'auto-mode-alist '("\\.yml\\'" . yaml-mode))
 #+END_SRC
 
-* COMMENT Cairo
-
-  A simple syntax highlighting mode for the [[https://www.cairo-lang.org][Cairo]]/StarkNet programming
-  language (lifted and adapted from
-  http://xahlee.info/emacs/emacs/elisp_syntax_coloring.html) and very
-  basic indentation.  Note that the StarkNet language is an extension
-  of Cairo that is not backwards compatible (i.e., the Cairo
-  compiler/runtime by itself cannot process StarkNet programs), but
-  for our intents we just see them as one language (Cairo by itself is
-  not really useful for us).
-
-  First, let's define the keywords:
-
-#+BEGIN_SRC emacs-lisp
-  (setq cairo-font-lock-keywords
-        (let* (
-               ;; define several category of keywords
-               (x-keywords '(
-                             ;; Cairo basics
-                             "%builtins"
-                             "%lang"
-                             "from"
-                             "import"
-                             "func"
-                             "return"
-                             "end"
-                             "if"
-                             "else"
-                             "const"
-                             "let"
-                             "alloc_locals"
-                             "local"
-                             "tempvar"
-                             "struct"
-                             "member"
-                             "assert"
-
-                             ;; StarkNet annotations
-                             "storage_var"
-                             "external"
-                             "view"
-                             ))
-               (x-types '("felt"))
-               ;; (x-constants '())
-               ;; (x-events '())
-               (x-functions '("get_fp_and_pc" "serialize_word"))
-
-               ;; generate regex string for each category of keywords
-               (x-keywords-regexp (regexp-opt x-keywords 'symbols))
-               (x-types-regexp (regexp-opt x-types 'symbols))
-               ;;(x-constants-regexp (regexp-opt x-constants 'words))
-               ;;(x-events-regexp (regexp-opt x-events 'words))
-               (x-functions-regexp (regexp-opt x-functions 'symbols)))
-
-          `(
-            (,x-types-regexp . font-lock-type-face)
-            ;; (,x-constants-regexp . font-lock-constant-face)
-            ;; (,x-events-regexp . font-lock-builtin-face)
-            (,x-functions-regexp . font-lock-function-name-face)
-            (,x-keywords-regexp . font-lock-keyword-face)
-            ;; note: order above matters, because once colored, that part won't change.
-            ;; in general, put longer words first
-            )))
-#+END_SRC
-
-  Then, let's make a basic indentation function: just augment the
-  initial amount of spaces (assumes spaces are used instead of tabs)
-  with ~tab-width~, while ensuring the amount of spaces is always a
-  multiplier of ~tab-width~.  This function can be used both for
-  indenting and unindenting.
-
-#+BEGIN_SRC emacs-lisp
-  (defun cairo--basic-indent (offset)
-    (let* ((current-column (current-indentation))
-           (current-levels (/ current-column tab-width))
-           (adjusted-column (* current-levels tab-width))
-           (target-column (+ adjusted-column (* offset tab-width))))
-      (save-excursion
-        (beginning-of-line)
-        (delete-horizontal-space)
-        (indent-to target-column))
-      (let ((x (- target-column (current-column))))
-        (when (> x 0)
-          (forward-char x)))))
-#+END_SRC
-
-  And finally, we define the ~cairo-mode~.
-
-#+BEGIN_SRC emacs-lisp
-  (define-derived-mode cairo-mode fundamental-mode "cairo"
-    "major mode for editing Cairo language code."
-
-    ;; set the font lock for the language keywords
-    (setq font-lock-defaults '((cairo-font-lock-keywords)))
-
-    ;; set the comment face
-    (setq comment-start "#")
-    (font-lock-add-keywords nil '(("#.+" . font-lock-comment-face)))
-
-    ;; define a basic indentation: TAB indents, BACKTAB unindents;
-    ;; disable electric indent
-    (setq indent-tabs-mode nil)
-    (setq tab-width 4)
-    (setq indent-line-function (lambda (&optional arg) (cairo--basic-indent 1)))
-    (local-set-key (kbd "<backtab>") (lambda () (interactive) (cairo--basic-indent -1)))
-    (electric-indent-local-mode 0))
-
-
-  (add-to-list 'auto-mode-alist '("\\.cairo\\'" . cairo-mode))
-#+END_SRC
-
-* COMMENT Solidity
-
-#+BEGIN_SRC emacs-lisp
-  (require 'flycheck)
-
-  (setq solidity-flycheck-solc-checker-active t)
-  (setq solidity-flycheck-solium-checker-active t)
-  (setq solidity-flycheck-solc-additional-allow-paths '("~/.brownie/packages"))
-
-  (require 'solidity-flycheck)
-  (require 'solidity-mode)
-
-  (setq solidity-comment-style 'slash)
-
-  (add-hook 'solidity-mode-hook 'flycheck-mode)
-#+END_SRC
-
 * Typescript
 
 #+BEGIN_SRC emacs-lisp
-  ; (push "/Users/ruaraujo/.nvm/versions/node/v16.14.0/bin" exec-path)
+  (push "/Users/rudiaraujo/.nvm/versions/node/v22.15.0/bin" exec-path)
 
   (require 'typescript-mode)
   (add-to-list 'auto-mode-alist '("\\.ts\\'" . typescript-mode))
@@ -915,13 +759,6 @@
 
 * JSON
 
-  By default, ~json-pretty-print-buffer~ uses two spaces per indentation level,
-  but we want four spaces:
-
-#+BEGIN_SRC emacs-lisp
-  (setq json-enconding-default-indentation "    ")
-#+END_SRC
-
   Plus, let's bind ~json-pretty-print-buffer~ to a key combination:
 
 #+BEGIN_SRC emacs-lisp
@@ -932,16 +769,21 @@
               (setq js-indent-level 2)))
 #+END_SRC
 
-* COMMENT Copilot
+* Copilot
 
 #+BEGIN_SRC emacs-lisp
   (use-package copilot
-    :straight (:host github :repo "zerolfx/copilot.el" :files ("dist" "*.el"))
-    :ensure t)
-
-  (add-hook 'prog-mode-hook 'copilot-mode)
-
-  (define-key copilot-completion-map (kbd "M-<tab>") 'copilot-accept-completion)
+    :vc (:url "https://github.com/copilot-emacs/copilot.el"
+              :rev :newest
+              :branch "main")
+    :hook ((prog-mode . copilot-mode)
+           (text-mode . copilot-mode)
+           (copilot-mode . (lambda ()
+                             (setq-local copilot--indent-warning-printed-p t))))
+    :bind (:map copilot-completion-map
+                ("§" . 'copilot-accept-completion)
+                ("s-§" . 'copilot-accept-completion-by-word)
+                ("M-§" . 'copilot-next-completion)))
 #+END_SRC
 
 * Exec path from shell
@@ -953,4 +795,98 @@
     (exec-path-from-shell-initialize))
 #+END_SRC
 
+* Line numbers
 
+  Enable line numbers globally:
+
+#+BEGIN_SRC emacs-lisp
+  (global-display-line-numbers-mode)
+#+END_SRC
+
+* Treemacs
+
+  This binding is used locally in some modes, but that is not a problem.  I
+  don't use it so much anyway.
+
+#+BEGIN_SRC emacs-lisp
+  (global-set-key (kbd "C-c t") 'treemacs)
+#+END_SRC
+
+  The mode line is useless in ~treemacs~, let's get rid of it:
+
+#+BEGIN_SRC emacs-lisp
+  (add-hook 'treemacs-mode-hook 
+            (lambda () 
+              (setq mode-line-format nil)
+              (face-remap-add-relative 'default :family "Helvetica Neue")
+              (display-line-numbers-mode -1)))
+#+END_SRC
+
+  I want to see the ~treemacs~ buffer by default:
+
+#+BEGIN_SRC emacs-lisp
+  (treemacs)
+#+END_SRC
+
+  Line folding doesn't work very well in ~treemacs~ (and it's ugly):
+
+#+BEGIN_SRC emacs-lisp
+  (toggle-truncate-lines 1)
+#+END_SRC
+
+* Pants
+
+  Enable Python mode on Pants BUILD files.  This of course shows a lot of errors related to unknown
+  functions, etc., but still nice to do stuff like linting/auto-fixing, and syntax checking.
+
+#+BEGIN_SRC emacs-lisp
+  (add-to-list 'auto-mode-alist '("BUILD\\'" . python-mode))
+#+END_SRC
+
+* Find on Github
+
+  Open the browser with the currently visited file on GitHub.
+
+#+BEGIN_SRC emacs-lisp
+  (require 'find-on-github)
+  (global-set-key (kbd "M-g b") 'browse-on-github)
+#+END_SRC
+
+* gptel - Large Language Model Interface for Emacs
+
+  GPTel is an Emacs package that provides interfaces to interact with large
+  language models directly within Emacs.  The following configuration sets up
+  GPTel to use Anthropic's Claude model.
+
+#+BEGIN_SRC emacs-lisp
+  (straight-use-package 'gptel)
+
+  (defun anthropic-key () (getenv "ANTHROPIC_API_KEY"))
+
+  (setq gptel-backend
+        (gptel-make-anthropic "Claude" :stream t :key 'anthropic-key))
+
+  (global-set-key (kbd "C-c l") 'gptel-send)
+  (global-set-key (kbd "C-c w") 'gptel-rewrite)
+  (global-set-key (kbd "C-c c") 'gptel)
+  (global-set-key (kbd "C-c q") 'gptel-quick) ; manually installed
+#+END_SRC
+
+* Emacs Application Framework
+
+  The Emacs Application Framework (EAF) enhances Emacs by embedding modern graphical applications
+  within the text editor through Python and PyQt technology. This extension allows users to browse
+  the web, view PDFs, manipulate images, and play videos directly in Emacs while maintaining its
+  keyboard-centric workflow.  Unfortunately, doesn't work super well in Mac OS (slow and doesn't
+  work well in fullscreen).
+
+#+BEGIN_SRC emacs-lisp
+  (use-package eaf
+    :load-path "~/.emacs.d/site-lisp/emacs-application-framework"
+    :custom
+    ;; See https://github.com/emacs-eaf/emacs-application-framework/wiki/Customization
+    (eaf-browser-continue-where-left-off t)
+    (eaf-browser-enable-adblocker t))
+
+  (require 'eaf-markdown-previewer)
+#+END_SRC
