@@ -791,6 +791,8 @@
   Copy env vars from shell.
 
 #+BEGIN_SRC emacs-lisp
+  (push "ANTHROPIC_API_KEY" exec-path-from-shell-variables)
+
   (when (memq window-system '(mac ns x))
     (exec-path-from-shell-initialize))
 #+END_SRC
